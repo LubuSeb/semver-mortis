@@ -3,8 +3,9 @@ use std::env;
 use std::process::ExitCode;
 
 use semver_mortis::{
-    Range, RangeOptions, ReleaseType, clean, clean_loose, coerce, compare, inc, parse, parse_loose,
-    valid,
+    Range, RangeOptions, ReleaseType, clean, clean_loose, coerce, compare, greater_than_range, inc,
+    intersects, less_than_range, max_satisfying, min_satisfying, min_version, parse, parse_loose,
+    valid, valid_range,
 };
 
 fn main() -> ExitCode {
@@ -77,6 +78,58 @@ fn run(mut args: Vec<String>) -> Result<Option<String>, String> {
             .test(required(&args, 1)?)
             .to_string(),
         )),
+        "valid-range" => Ok(valid_range(
+            required(&args, 1)?,
+            RangeOptions {
+                loose,
+                include_prerelease,
+            },
+        )),
+        "min-version" => Ok(min_version(
+            required(&args, 1)?,
+            RangeOptions {
+                loose,
+                include_prerelease,
+            },
+        )
+        .map(|version| version.version().to_owned())),
+        "gtr" | "ltr" => {
+            let options = RangeOptions {
+                loose,
+                include_prerelease,
+            };
+            let result = if command == "gtr" {
+                greater_than_range(required(&args, 1)?, required(&args, 2)?, options)
+            } else {
+                less_than_range(required(&args, 1)?, required(&args, 2)?, options)
+            };
+            Ok(Some(result.map_err(|error| error.to_string())?.to_string()))
+        }
+        "intersects" => Ok(Some(
+            intersects(
+                required(&args, 1)?,
+                required(&args, 2)?,
+                RangeOptions {
+                    loose,
+                    include_prerelease,
+                },
+            )
+            .map_err(|error| error.to_string())?
+            .to_string(),
+        )),
+        "max-satisfying" | "min-satisfying" => {
+            let range = required(&args, 1)?;
+            let versions: Vec<_> = args.iter().skip(2).map(String::as_str).collect();
+            let options = RangeOptions {
+                loose,
+                include_prerelease,
+            };
+            Ok(if command == "max-satisfying" {
+                max_satisfying(&versions, range, options)
+            } else {
+                min_satisfying(&versions, range, options)
+            })
+        }
         _ => Err(usage()),
     }
 }
@@ -118,5 +171,5 @@ fn release_type(value: &str) -> Result<ReleaseType, String> {
 }
 
 fn usage() -> String {
-    "usage: semver-mortis [--loose] [--include-prerelease] <valid|clean|parse|coerce|compare|inc|range|satisfies> ...".into()
+    "usage: semver-mortis [--loose] [--include-prerelease] <valid|clean|parse|coerce|compare|inc|range|satisfies|valid-range|min-version|gtr|ltr|intersects|max-satisfying|min-satisfying> ...".into()
 }

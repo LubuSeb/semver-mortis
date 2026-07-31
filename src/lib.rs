@@ -5,6 +5,7 @@ mod coerce;
 mod comparator;
 mod functions;
 mod range;
+mod range_functions;
 mod version;
 
 pub use coerce::{CoerceOptions, coerce, coerce_with_options};
@@ -15,6 +16,10 @@ pub use functions::{
     truncate,
 };
 pub use range::{Range, RangeError, RangeOptions};
+pub use range_functions::{
+    greater_than_range, intersects, less_than_range, max_satisfying, min_satisfying, min_version,
+    satisfies, simplify, to_comparators, valid_range,
+};
 pub use version::{Identifier, IdentifierBase, IncrementError, ParseError, ReleaseType, SemVer};
 
 /// The exact upstream revision used as the behavioral oracle.
