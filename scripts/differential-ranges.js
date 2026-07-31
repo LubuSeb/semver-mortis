@@ -1,7 +1,9 @@
 'use strict'
 
 const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
 const path = require('node:path')
+const vm = require('node:vm')
 
 const root = path.resolve(__dirname, '..')
 const binary = process.env.SEMVER_MORTIS_BIN || path.join(
@@ -77,6 +79,26 @@ for (const [left, right, expected] of require(path.join(fixtures, 'range-interse
   assertions++
   if (actual !== expected) {
     failures.push({ suite: 'range-intersection', left, right, expected, actual })
+  }
+}
+
+const subsetSource = fs.readFileSync(
+  path.join(root, 'tests', 'original', 'ranges', 'subset.js'),
+  'utf8'
+)
+const subsetMatch = subsetSource.match(
+  /const cases = (\[[\s\S]*?\r?\n\])\r?\n\r?\nt\.plan/
+)
+if (!subsetMatch) {
+  throw new Error('could not locate unchanged subset cases')
+}
+const subsetCases = vm.runInNewContext(`(${subsetMatch[1]})`)
+for (const [sub, domain, expected, options = {}] of subsetCases) {
+  const run = execute([...optionsArgs(options), 'subset', sub, domain])
+  const actual = run.status === 0 && run.stdout.trim() === 'true'
+  assertions++
+  if (actual !== expected) {
+    failures.push({ suite: 'subset', sub, domain, expected, actual, options })
   }
 }
 

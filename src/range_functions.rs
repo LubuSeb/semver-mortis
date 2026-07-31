@@ -177,6 +177,282 @@ pub fn simplify(versions: &[&str], input: &str, options: RangeOptions) -> Option
     })
 }
 
+/// Return whether every version admitted by `sub` is also admitted by `domain`.
+pub fn subset(sub: &str, domain: &str, options: RangeOptions) -> Result<bool, RangeError> {
+    if sub == domain {
+        return Ok(true);
+    }
+    let sub = Range::parse_with_options(sub, options)?;
+    let domain = Range::parse_with_options(domain, options)?;
+    let mut saw_non_null = false;
+
+    'outer: for simple_sub in sub.sets() {
+        for simple_domain in domain.sets() {
+            let result = simple_subset(simple_sub, simple_domain, options);
+            saw_non_null |= result.is_some();
+            if result == Some(true) {
+                continue 'outer;
+            }
+        }
+        if saw_non_null {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+fn simple_subset(sub: &[Comparator], domain: &[Comparator], options: RangeOptions) -> Option<bool> {
+    if sub == domain {
+        return Some(true);
+    }
+
+    let minimum = || {
+        Comparator::parse(
+            if options.include_prerelease {
+                ">=0.0.0-0"
+            } else {
+                ">=0.0.0"
+            },
+            false,
+        )
+        .expect("static comparator")
+    };
+    let mut sub_storage = Vec::new();
+    let sub = if is_any_set(sub) {
+        if is_any_set(domain) {
+            return Some(true);
+        }
+        sub_storage.push(minimum());
+        &sub_storage
+    } else {
+        sub
+    };
+    let mut domain_storage = Vec::new();
+    let domain = if is_any_set(domain) {
+        if options.include_prerelease {
+            return Some(true);
+        }
+        domain_storage.push(minimum());
+        &domain_storage
+    } else {
+        domain
+    };
+
+    let mut exact = Vec::new();
+    let mut greatest_lower: Option<&Comparator> = None;
+    let mut least_upper: Option<&Comparator> = None;
+    for comparator in sub {
+        match comparator.operator() {
+            ComparatorOperator::Greater | ComparatorOperator::GreaterOrEqual => {
+                greatest_lower = Some(higher_gt(greatest_lower, comparator));
+            }
+            ComparatorOperator::Less | ComparatorOperator::LessOrEqual => {
+                least_upper = Some(lower_lt(least_upper, comparator));
+            }
+            ComparatorOperator::Exact => exact.push(comparator),
+            ComparatorOperator::Any => {}
+        }
+    }
+    if exact.len() > 1 {
+        return None;
+    }
+
+    let bound_ordering = match (greatest_lower, least_upper) {
+        (Some(lower), Some(upper)) => {
+            let ordering = lower
+                .semver()
+                .expect("bound")
+                .compare(upper.semver().expect("bound"));
+            if ordering == Ordering::Greater
+                || (ordering == Ordering::Equal
+                    && (lower.operator() != ComparatorOperator::GreaterOrEqual
+                        || upper.operator() != ComparatorOperator::LessOrEqual))
+            {
+                return None;
+            }
+            Some(ordering)
+        }
+        _ => None,
+    };
+
+    if let Some(exact) = exact.first() {
+        let version = exact.semver().expect("exact version");
+        if greatest_lower.is_some_and(|bound| !bound.test_version(version))
+            || least_upper.is_some_and(|bound| !bound.test_version(version))
+        {
+            return None;
+        }
+        return Some(
+            domain
+                .iter()
+                .all(|comparator| single_comparator_satisfies(version, comparator, options)),
+        );
+    }
+
+    let mut need_lower_prerelease = greatest_lower
+        .and_then(Comparator::semver)
+        .filter(|version| !options.include_prerelease && !version.prerelease().is_empty());
+    let mut need_upper_prerelease = least_upper
+        .and_then(Comparator::semver)
+        .filter(|version| !options.include_prerelease && !version.prerelease().is_empty());
+    if let (Some(bound), Some(version)) = (least_upper, need_upper_prerelease)
+        && bound.operator() == ComparatorOperator::Less
+        && version.prerelease().len() == 1
+        && version.prerelease()[0] == crate::Identifier::Numeric(0)
+    {
+        need_upper_prerelease = None;
+    }
+
+    let mut has_domain_lower = false;
+    let mut has_domain_upper = false;
+    for comparator in domain {
+        has_domain_lower |= matches!(
+            comparator.operator(),
+            ComparatorOperator::Greater | ComparatorOperator::GreaterOrEqual
+        );
+        has_domain_upper |= matches!(
+            comparator.operator(),
+            ComparatorOperator::Less | ComparatorOperator::LessOrEqual
+        );
+
+        if let Some(lower) = greatest_lower {
+            clear_matching_prerelease(&mut need_lower_prerelease, comparator);
+            if matches!(
+                comparator.operator(),
+                ComparatorOperator::Greater | ComparatorOperator::GreaterOrEqual
+            ) {
+                if std::ptr::eq(higher_gt(Some(lower), comparator), comparator) {
+                    return Some(false);
+                }
+            } else if lower.operator() == ComparatorOperator::GreaterOrEqual
+                && !comparator.test_version(lower.semver().expect("bound"))
+            {
+                return Some(false);
+            }
+        }
+
+        if let Some(upper) = least_upper {
+            clear_matching_prerelease(&mut need_upper_prerelease, comparator);
+            if matches!(
+                comparator.operator(),
+                ComparatorOperator::Less | ComparatorOperator::LessOrEqual
+            ) {
+                if std::ptr::eq(lower_lt(Some(upper), comparator), comparator) {
+                    return Some(false);
+                }
+            } else if upper.operator() == ComparatorOperator::LessOrEqual
+                && !comparator.test_version(upper.semver().expect("bound"))
+            {
+                return Some(false);
+            }
+        }
+
+        if comparator.operator() == ComparatorOperator::Exact
+            && (least_upper.is_some() || greatest_lower.is_some())
+            && bound_ordering != Some(Ordering::Equal)
+        {
+            return Some(false);
+        }
+    }
+
+    if greatest_lower.is_some()
+        && has_domain_upper
+        && least_upper.is_none()
+        && bound_ordering != Some(Ordering::Equal)
+    {
+        return Some(false);
+    }
+    if least_upper.is_some()
+        && has_domain_lower
+        && greatest_lower.is_none()
+        && bound_ordering != Some(Ordering::Equal)
+    {
+        return Some(false);
+    }
+    if need_lower_prerelease.is_some() || need_upper_prerelease.is_some() {
+        return Some(false);
+    }
+    Some(true)
+}
+
+fn is_any_set(set: &[Comparator]) -> bool {
+    set.len() == 1 && set[0].operator() == ComparatorOperator::Any
+}
+
+fn higher_gt<'a>(current: Option<&'a Comparator>, candidate: &'a Comparator) -> &'a Comparator {
+    let Some(current) = current else {
+        return candidate;
+    };
+    match current
+        .semver()
+        .expect("bound")
+        .compare(candidate.semver().expect("bound"))
+    {
+        Ordering::Greater => current,
+        Ordering::Less => candidate,
+        Ordering::Equal
+            if candidate.operator() == ComparatorOperator::Greater
+                && current.operator() == ComparatorOperator::GreaterOrEqual =>
+        {
+            candidate
+        }
+        Ordering::Equal => current,
+    }
+}
+
+fn lower_lt<'a>(current: Option<&'a Comparator>, candidate: &'a Comparator) -> &'a Comparator {
+    let Some(current) = current else {
+        return candidate;
+    };
+    match current
+        .semver()
+        .expect("bound")
+        .compare(candidate.semver().expect("bound"))
+    {
+        Ordering::Less => current,
+        Ordering::Greater => candidate,
+        Ordering::Equal
+            if candidate.operator() == ComparatorOperator::Less
+                && current.operator() == ComparatorOperator::LessOrEqual =>
+        {
+            candidate
+        }
+        Ordering::Equal => current,
+    }
+}
+
+fn clear_matching_prerelease(needed: &mut Option<&SemVer>, comparator: &Comparator) {
+    let (Some(expected), Some(candidate)) = (*needed, comparator.semver()) else {
+        return;
+    };
+    if !candidate.prerelease().is_empty()
+        && candidate.major() == expected.major()
+        && candidate.minor() == expected.minor()
+        && candidate.patch() == expected.patch()
+    {
+        *needed = None;
+    }
+}
+
+fn single_comparator_satisfies(
+    version: &SemVer,
+    comparator: &Comparator,
+    options: RangeOptions,
+) -> bool {
+    if !comparator.test_version(version) {
+        return false;
+    }
+    if version.prerelease().is_empty() || options.include_prerelease {
+        return true;
+    }
+    comparator.semver().is_some_and(|allowed| {
+        !allowed.prerelease().is_empty()
+            && allowed.major() == version.major()
+            && allowed.minor() == version.minor()
+            && allowed.patch() == version.patch()
+    })
+}
+
 #[derive(Clone, Copy)]
 enum OutsideDirection {
     Higher,
@@ -335,5 +611,14 @@ mod tests {
         assert_eq!(greater_than_range("0.5.0", "^1.0.0", options), Ok(false));
         assert_eq!(less_than_range("0.5.0", "^1.0.0", options), Ok(true));
         assert_eq!(less_than_range("3.0.0", "^1.0.0", options), Ok(false));
+    }
+
+    #[test]
+    fn checks_range_subsets() {
+        let options = RangeOptions::default();
+        assert_eq!(subset("1.2.x", "^1.0.0", options), Ok(true));
+        assert_eq!(subset("^1.0.0", "1.2.x", options), Ok(false));
+        assert_eq!(subset(">2 <1", "1.x", options), Ok(true));
+        assert_eq!(subset("1.2.3 || 2.0.0", ">=1.0.0", options), Ok(true));
     }
 }

@@ -18,7 +18,7 @@ pub use functions::{
 pub use range::{Range, RangeError, RangeOptions};
 pub use range_functions::{
     greater_than_range, intersects, less_than_range, max_satisfying, min_satisfying, min_version,
-    satisfies, simplify, to_comparators, valid_range,
+    satisfies, simplify, subset, to_comparators, valid_range,
 };
 pub use version::{Identifier, IdentifierBase, IncrementError, ParseError, ReleaseType, SemVer};
 

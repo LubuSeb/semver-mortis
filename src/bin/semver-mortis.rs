@@ -5,7 +5,8 @@ use std::process::ExitCode;
 use semver_mortis::{
     IdentifierBase, Range, RangeOptions, ReleaseType, clean, clean_loose, coerce, compare,
     compare_loose, greater_than_range, inc, inc_with_options, intersects, less_than_range,
-    max_satisfying, min_satisfying, min_version, parse, parse_loose, truncate, valid, valid_range,
+    max_satisfying, min_satisfying, min_version, parse, parse_loose, subset, truncate, valid,
+    valid_range,
 };
 
 fn main() -> ExitCode {
@@ -148,6 +149,18 @@ fn run(mut args: Vec<String>) -> Result<Option<String>, String> {
             .map_err(|error| error.to_string())?
             .to_string(),
         )),
+        "subset" => Ok(Some(
+            subset(
+                required(&args, 1)?,
+                required(&args, 2)?,
+                RangeOptions {
+                    loose,
+                    include_prerelease,
+                },
+            )
+            .map_err(|error| error.to_string())?
+            .to_string(),
+        )),
         "max-satisfying" | "min-satisfying" => {
             let range = required(&args, 1)?;
             let versions: Vec<_> = args.iter().skip(2).map(String::as_str).collect();
@@ -217,5 +230,5 @@ fn identifier_base(value: &str) -> Result<IdentifierBase, String> {
 }
 
 fn usage() -> String {
-    "usage: semver-mortis [--loose] [--include-prerelease] [--identifier ID] [--identifier-base 0|1|false] <valid|clean|parse|coerce|compare|inc|truncate|range|satisfies|valid-range|min-version|gtr|ltr|intersects|max-satisfying|min-satisfying> ...".into()
+    "usage: semver-mortis [--loose] [--include-prerelease] [--identifier ID] [--identifier-base 0|1|false] <valid|clean|parse|coerce|compare|inc|truncate|range|satisfies|valid-range|min-version|gtr|ltr|intersects|subset|max-satisfying|min-satisfying> ...".into()
 }
