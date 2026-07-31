@@ -5,6 +5,7 @@
     "test": "cargo test && cargo build && node scripts/differential-core.js && node scripts/differential-ranges.js",
     "test:rust": "cargo test",
     "test:core": "cargo build && node scripts/differential-core.js",
-    "test:ranges": "cargo build && node scripts/differential-ranges.js"
+    "test:ranges": "cargo build && node scripts/differential-ranges.js",
+    "bench:node": "node scripts/benchmark-node.js"
   }
 }

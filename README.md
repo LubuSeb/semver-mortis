@@ -15,9 +15,14 @@ This repository was created after kickoff. Implementation will land in small, au
 cargo test
 cargo clippy --all-targets -- -D warnings
 npm test
+cargo bench --bench throughput
 ```
 
 `npm test` runs the Rust suite and then drives the compiled CLI through the
 unchanged upstream fixtures and test vectors. It currently checks 1,144 core parsing, comparison,
 coercion, increment, truncation, range parsing, inclusion/exclusion, outside-range, and
 intersection/subset cases without requiring npm dependencies.
+
+Deterministic property tests add 17,000 generated ordering, round-trip, and
+range-normalization scenarios. See [BENCHMARKS.md](BENCHMARKS.md) for the
+reproducible performance snapshot.
