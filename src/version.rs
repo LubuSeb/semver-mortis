@@ -79,6 +79,7 @@ impl Error for ParseError {}
 #[derive(Clone, Debug)]
 pub struct SemVer {
     raw: String,
+    loose: bool,
     major: u64,
     minor: u64,
     patch: u64,
@@ -90,32 +91,39 @@ pub struct SemVer {
 impl SemVer {
     /// Parse the strict `node-semver` version grammar.
     pub fn parse(input: &str) -> Result<Self, ParseError> {
+        Self::parse_mode(input, false)
+    }
+
+    /// Parse npm's permissive version grammar.
+    pub fn parse_loose(input: &str) -> Result<Self, ParseError> {
+        Self::parse_mode(input, true)
+    }
+
+    fn parse_mode(input: &str, loose: bool) -> Result<Self, ParseError> {
         if input.encode_utf16().count() > MAX_LENGTH {
             return Err(ParseError::TooLong);
         }
 
         let raw = input.to_owned();
         let trimmed = input.trim();
-        let value = trimmed.strip_prefix('v').unwrap_or(trimmed);
+        let value = if loose {
+            trimmed.trim_start_matches(|character: char| {
+                character == 'v' || character == '=' || character.is_whitespace()
+            })
+        } else {
+            trimmed.strip_prefix('v').unwrap_or(trimmed)
+        };
 
-        let (without_build, build_text) = split_once(value, '+');
-        if build_text.is_some_and(|build| !valid_build(build)) {
-            return Err(ParseError::InvalidVersion);
-        }
-
-        let (core, prerelease_text) = split_once(without_build, '-');
-        if prerelease_text.is_some_and(|prerelease| !valid_prerelease(prerelease)) {
-            return Err(ParseError::InvalidVersion);
-        }
+        let (core, prerelease_text, build_text) = split_version_parts(value, loose)?;
 
         let mut components = core.split('.');
         let major_text = components.next().ok_or(ParseError::InvalidVersion)?;
         let minor_text = components.next().ok_or(ParseError::InvalidVersion)?;
         let patch_text = components.next().ok_or(ParseError::InvalidVersion)?;
         if components.next().is_some()
-            || !valid_core_number(major_text)
-            || !valid_core_number(minor_text)
-            || !valid_core_number(patch_text)
+            || !valid_core_number(major_text, loose)
+            || !valid_core_number(minor_text, loose)
+            || !valid_core_number(patch_text, loose)
         {
             return Err(ParseError::InvalidVersion);
         }
@@ -133,6 +141,7 @@ impl SemVer {
         let version = format_version(major, minor, patch, &prerelease);
         Ok(Self {
             raw,
+            loose,
             major,
             minor,
             patch,
@@ -144,6 +153,10 @@ impl SemVer {
 
     pub fn raw(&self) -> &str {
         &self.raw
+    }
+
+    pub fn is_loose(&self) -> bool {
+        self.loose
     }
 
     pub fn major(&self) -> u64 {
@@ -239,10 +252,62 @@ fn split_once(value: &str, separator: char) -> (&str, Option<&str>) {
     }
 }
 
-fn valid_core_number(value: &str) -> bool {
+fn split_version_parts(
+    value: &str,
+    loose: bool,
+) -> Result<(&str, Option<&str>, Option<&str>), ParseError> {
+    if !loose {
+        let (without_build, build) = split_once(value, '+');
+        if build.is_some_and(|value| !valid_build(value)) {
+            return Err(ParseError::InvalidVersion);
+        }
+        let (core, prerelease) = split_once(without_build, '-');
+        if prerelease.is_some_and(|value| !valid_prerelease(value, false)) {
+            return Err(ParseError::InvalidVersion);
+        }
+        return Ok((core, prerelease, build));
+    }
+
+    let bytes = value.as_bytes();
+    let mut cursor = 0;
+    for component in 0..3 {
+        let start = cursor;
+        while bytes.get(cursor).is_some_and(u8::is_ascii_digit) {
+            cursor += 1;
+        }
+        if cursor == start {
+            return Err(ParseError::InvalidVersion);
+        }
+        if component != 2 {
+            if bytes.get(cursor) != Some(&b'.') {
+                return Err(ParseError::InvalidVersion);
+            }
+            cursor += 1;
+        }
+    }
+
+    let core = &value[..cursor];
+    let remainder = &value[cursor..];
+    let (prerelease_part, build) = split_once(remainder, '+');
+    if build.is_some_and(|value| !valid_build(value)) {
+        return Err(ParseError::InvalidVersion);
+    }
+    let prerelease = if prerelease_part.is_empty() {
+        None
+    } else {
+        let value = prerelease_part.strip_prefix('-').unwrap_or(prerelease_part);
+        if !valid_prerelease(value, true) {
+            return Err(ParseError::InvalidVersion);
+        }
+        Some(value)
+    };
+    Ok((core, prerelease, build))
+}
+
+fn valid_core_number(value: &str, loose: bool) -> bool {
     !value.is_empty()
         && value.bytes().all(|byte| byte.is_ascii_digit())
-        && (value == "0" || !value.starts_with('0'))
+        && (loose || value == "0" || !value.starts_with('0'))
 }
 
 fn parse_core_number(value: &str, overflow: ParseError) -> Result<u64, ParseError> {
@@ -252,11 +317,12 @@ fn parse_core_number(value: &str, overflow: ParseError) -> Result<u64, ParseErro
         .ok_or(overflow)
 }
 
-fn valid_prerelease(value: &str) -> bool {
+fn valid_prerelease(value: &str, loose: bool) -> bool {
     !value.is_empty()
         && value.split('.').all(|identifier| {
             valid_identifier(identifier)
-                && (!identifier.bytes().all(|byte| byte.is_ascii_digit())
+                && (loose
+                    || !identifier.bytes().all(|byte| byte.is_ascii_digit())
                     || identifier == "0"
                     || !identifier.starts_with('0'))
         })
