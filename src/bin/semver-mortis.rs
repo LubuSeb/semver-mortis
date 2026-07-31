@@ -3,10 +3,10 @@ use std::env;
 use std::process::ExitCode;
 
 use semver_mortis::{
-    IdentifierBase, Range, RangeOptions, ReleaseType, clean, clean_loose, coerce, compare,
-    compare_loose, greater_than_range, inc, inc_with_options, intersects, less_than_range,
-    max_satisfying, min_satisfying, min_version, parse, parse_loose, subset, truncate, valid,
-    valid_range,
+    CoerceOptions, IdentifierBase, Range, RangeOptions, ReleaseType, clean, clean_loose, coerce,
+    coerce_with_options, compare, compare_loose, greater_than_range, inc, inc_with_options,
+    intersects, less_than_range, max_satisfying, min_satisfying, min_version, parse, parse_loose,
+    subset, truncate, valid, valid_range,
 };
 
 fn main() -> ExitCode {
@@ -26,6 +26,7 @@ fn main() -> ExitCode {
 fn run(mut args: Vec<String>) -> Result<Option<String>, String> {
     let loose = take_flag(&mut args, "--loose");
     let include_prerelease = take_flag(&mut args, "--include-prerelease");
+    let rtl = take_flag(&mut args, "--rtl");
     let identifier = take_option(&mut args, "--identifier");
     let identifier_base = take_option(&mut args, "--identifier-base")
         .as_deref()
@@ -56,7 +57,26 @@ fn run(mut args: Vec<String>) -> Result<Option<String>, String> {
         }
         .ok()
         .map(|value| value.version().to_owned())),
-        "coerce" => Ok(coerce(required(&args, 1)?).map(|value| value.version().to_owned())),
+        "coerce" | "coerce-full" => {
+            let value = if rtl || include_prerelease {
+                coerce_with_options(
+                    required(&args, 1)?,
+                    CoerceOptions {
+                        rtl,
+                        include_prerelease,
+                    },
+                )
+            } else {
+                coerce(required(&args, 1)?)
+            };
+            Ok(value.map(|value| {
+                if command == "coerce-full" {
+                    value.raw().to_owned()
+                } else {
+                    value.version().to_owned()
+                }
+            }))
+        }
         "compare" => Ok(Some(ordering_text(
             (if loose {
                 compare_loose(required(&args, 1)?, required(&args, 2)?)
@@ -230,5 +250,5 @@ fn identifier_base(value: &str) -> Result<IdentifierBase, String> {
 }
 
 fn usage() -> String {
-    "usage: semver-mortis [--loose] [--include-prerelease] [--identifier ID] [--identifier-base 0|1|false] <valid|clean|parse|coerce|compare|inc|truncate|range|satisfies|valid-range|min-version|gtr|ltr|intersects|subset|max-satisfying|min-satisfying> ...".into()
+    "usage: semver-mortis [--loose] [--rtl] [--include-prerelease] [--identifier ID] [--identifier-base 0|1|false] <valid|clean|parse|coerce|coerce-full|compare|inc|truncate|range|satisfies|valid-range|min-version|gtr|ltr|intersects|subset|max-satisfying|min-satisfying> ...".into()
 }

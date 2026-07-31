@@ -1,7 +1,9 @@
 'use strict'
 
 const { spawnSync } = require('node:child_process')
+const fs = require('node:fs')
 const path = require('node:path')
+const vm = require('node:vm')
 
 const root = path.resolve(__dirname, '..')
 const binary = process.env.SEMVER_MORTIS_BIN || path.join(
@@ -86,6 +88,43 @@ for (const [version, release, expected] of require(path.join(fixtures, 'truncati
     expected,
     { version, release }
   )
+}
+
+const coerceSource = fs.readFileSync(
+  path.join(root, 'tests', 'original', 'functions', 'coerce.js'),
+  'utf8'
+)
+const extractCoerceCases = (name) => {
+  const expression = new RegExp(
+    `const ${name} = (\\[[\\s\\S]*?\\r?\\n  \\])\\r?\\n  ${name}\\.forEach`
+  )
+  const match = coerceSource.match(expression)
+  if (!match) {
+    throw new Error(`could not locate unchanged ${name} cases`)
+  }
+  return vm.runInNewContext(`(${match[1]})`, { parse: value => value })
+}
+const coerceOutput = (input, options = {}) => {
+  const args = []
+  if (options?.rtl) {
+    args.push('--rtl')
+  }
+  if (options?.includePrerelease) {
+    args.push('--include-prerelease')
+  }
+  args.push('coerce-full', String(input))
+  return output(execute(args))
+}
+
+for (const input of extractCoerceCases('coerceToNull')) {
+  if (typeof input === 'string' || typeof input === 'number') {
+    check('coerce-invalid', coerceOutput(input), null, { input })
+  }
+}
+for (const [input, expected, options] of extractCoerceCases('coerceToValid')) {
+  if (typeof input === 'string' || typeof input === 'number') {
+    check('coerce-valid', coerceOutput(input, options), expected, { input, options })
+  }
 }
 
 if (failures.length) {

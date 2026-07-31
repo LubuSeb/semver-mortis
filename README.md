@@ -18,6 +18,6 @@ npm test
 ```
 
 `npm test` runs the Rust suite and then drives the compiled CLI through the
-unchanged upstream fixtures and test vectors. It currently checks 1,027 core parsing, comparison,
-increment, truncation, range parsing, inclusion/exclusion, outside-range, and
+unchanged upstream fixtures and test vectors. It currently checks 1,144 core parsing, comparison,
+coercion, increment, truncation, range parsing, inclusion/exclusion, outside-range, and
 intersection/subset cases without requiring npm dependencies.
