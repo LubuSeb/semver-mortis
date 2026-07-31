@@ -2,6 +2,7 @@
 name = "semver-mortis"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
 license = "ISC"
 description = "A proof-driven Rust port of npm/node-semver"
 repository = "https://github.com/LubuSeb/semver-mortis"

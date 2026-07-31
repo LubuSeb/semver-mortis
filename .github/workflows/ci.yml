@@ -1,0 +1,29 @@
+name: proof
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install Rust components
+        run: rustup component add rustfmt clippy
+      - name: Install proof-harness dependencies
+        run: npm ci --ignore-scripts
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Lint Rust
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Run complete proof
+        run: npm test
