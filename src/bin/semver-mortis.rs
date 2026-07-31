@@ -356,7 +356,7 @@ fn encode_hex(value: &str) -> String {
 }
 
 fn decode_hex(value: &str) -> Result<String, String> {
-    if !value.len().is_multiple_of(2) {
+    if value.len() % 2 != 0 {
         return Err("invalid protocol hex".into());
     }
     let bytes = value
