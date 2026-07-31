@@ -2,8 +2,9 @@
   "name": "semver-mortis-proof-harness",
   "private": true,
   "scripts": {
-    "test": "cargo test && cargo build && node scripts/differential-ranges.js",
+    "test": "cargo test && cargo build && node scripts/differential-core.js && node scripts/differential-ranges.js",
     "test:rust": "cargo test",
+    "test:core": "cargo build && node scripts/differential-core.js",
     "test:ranges": "cargo build && node scripts/differential-ranges.js"
   }
 }
