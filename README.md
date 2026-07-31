@@ -9,3 +9,14 @@ A from-scratch Rust port of [`npm/node-semver`](https://github.com/npm/node-semv
 
 This repository was created after kickoff. Implementation will land in small, auditable commits.
 
+## Verification
+
+```sh
+cargo test
+cargo clippy --all-targets -- -D warnings
+npm test
+```
+
+`npm test` runs the Rust suite and then drives the compiled CLI through the
+unchanged upstream range fixtures. It currently checks all 357 range parsing,
+inclusion, and exclusion cases without requiring npm dependencies.

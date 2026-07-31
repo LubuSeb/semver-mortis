@@ -4,6 +4,7 @@
 mod coerce;
 mod comparator;
 mod functions;
+mod range;
 mod version;
 
 pub use coerce::{CoerceOptions, coerce, coerce_with_options};
@@ -13,6 +14,7 @@ pub use functions::{
     diff, eq, gt, gte, lt, lte, major, minor, neq, patch, prerelease, rcompare, rsort, sort,
     truncate,
 };
+pub use range::{Range, RangeError, RangeOptions};
 pub use version::{Identifier, IdentifierBase, IncrementError, ParseError, ReleaseType, SemVer};
 
 /// The exact upstream revision used as the behavioral oracle.
