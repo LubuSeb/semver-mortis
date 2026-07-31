@@ -75,6 +75,49 @@ impl fmt::Display for ParseError {
 
 impl Error for ParseError {}
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReleaseType {
+    Major,
+    Premajor,
+    Minor,
+    Preminor,
+    Patch,
+    Prepatch,
+    Prerelease,
+    Release,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum IdentifierBase {
+    #[default]
+    Zero,
+    One,
+    Omit,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IncrementError {
+    IdentifierRequired,
+    IdentifierAlreadyExists,
+    InvalidIdentifier,
+    NotPrerelease,
+    Overflow,
+}
+
+impl fmt::Display for IncrementError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::IdentifierRequired => "identifier is required when its numeric base is omitted",
+            Self::IdentifierAlreadyExists => "identifier already exists",
+            Self::InvalidIdentifier => "invalid prerelease identifier",
+            Self::NotPrerelease => "version is not a prerelease",
+            Self::Overflow => "version component overflow",
+        })
+    }
+}
+
+impl Error for IncrementError {}
+
 /// npm-compatible semantic version data.
 #[derive(Clone, Debug)]
 pub struct SemVer {
@@ -209,6 +252,154 @@ impl SemVer {
         self.compare_main(other)
             .then_with(|| self.compare_pre(other))
     }
+
+    /// Apply npm's `SemVer#inc` state machine in place.
+    pub fn increment(
+        &mut self,
+        release: ReleaseType,
+        identifier: Option<&str>,
+        identifier_base: IdentifierBase,
+    ) -> Result<&mut Self, IncrementError> {
+        let identifier = identifier.filter(|value| !value.is_empty());
+        if matches!(
+            release,
+            ReleaseType::Premajor
+                | ReleaseType::Preminor
+                | ReleaseType::Prepatch
+                | ReleaseType::Prerelease
+        ) {
+            if identifier.is_none() && identifier_base == IdentifierBase::Omit {
+                return Err(IncrementError::IdentifierRequired);
+            }
+            if identifier.is_some_and(|value| !valid_prerelease(value, self.loose)) {
+                return Err(IncrementError::InvalidIdentifier);
+            }
+        }
+
+        match release {
+            ReleaseType::Premajor => {
+                self.prerelease.clear();
+                self.patch = 0;
+                self.minor = 0;
+                self.major = checked_increment(self.major)?;
+                self.increment_pre(identifier, identifier_base)?;
+            }
+            ReleaseType::Preminor => {
+                self.prerelease.clear();
+                self.patch = 0;
+                self.minor = checked_increment(self.minor)?;
+                self.increment_pre(identifier, identifier_base)?;
+            }
+            ReleaseType::Prepatch => {
+                self.prerelease.clear();
+                self.increment_patch()?;
+                self.increment_pre(identifier, identifier_base)?;
+            }
+            ReleaseType::Prerelease => {
+                if self.prerelease.is_empty() {
+                    self.increment_patch()?;
+                }
+                self.increment_pre(identifier, identifier_base)?;
+            }
+            ReleaseType::Release => {
+                if self.prerelease.is_empty() {
+                    return Err(IncrementError::NotPrerelease);
+                }
+                self.prerelease.clear();
+            }
+            ReleaseType::Major => {
+                if self.minor != 0 || self.patch != 0 || self.prerelease.is_empty() {
+                    self.major = checked_increment(self.major)?;
+                }
+                self.minor = 0;
+                self.patch = 0;
+                self.prerelease.clear();
+            }
+            ReleaseType::Minor => {
+                if self.patch != 0 || self.prerelease.is_empty() {
+                    self.minor = checked_increment(self.minor)?;
+                }
+                self.patch = 0;
+                self.prerelease.clear();
+            }
+            ReleaseType::Patch => self.increment_patch()?,
+        }
+
+        self.refresh();
+        Ok(self)
+    }
+
+    fn increment_patch(&mut self) -> Result<(), IncrementError> {
+        if self.prerelease.is_empty() {
+            self.patch = checked_increment(self.patch)?;
+        }
+        self.prerelease.clear();
+        Ok(())
+    }
+
+    fn increment_pre(
+        &mut self,
+        identifier: Option<&str>,
+        identifier_base: IdentifierBase,
+    ) -> Result<(), IncrementError> {
+        let base = match identifier_base {
+            IdentifierBase::One => 1,
+            IdentifierBase::Zero | IdentifierBase::Omit => 0,
+        };
+
+        if self.prerelease.is_empty() {
+            self.prerelease.push(Identifier::Numeric(base));
+        } else {
+            let mut incremented = false;
+            for part in self.prerelease.iter_mut().rev() {
+                if let Identifier::Numeric(number) = part {
+                    *number = checked_increment(*number)?;
+                    incremented = true;
+                    break;
+                }
+            }
+            if !incremented {
+                if identifier_base == IdentifierBase::Omit
+                    && identifier.is_some_and(|value| value == join_identifiers(&self.prerelease))
+                {
+                    return Err(IncrementError::IdentifierAlreadyExists);
+                }
+                self.prerelease.push(Identifier::Numeric(base));
+            }
+        }
+
+        if let Some(identifier) = identifier {
+            let replacement = if identifier_base == IdentifierBase::Omit {
+                vec![Identifier::Text(identifier.to_owned())]
+            } else {
+                vec![
+                    Identifier::Text(identifier.to_owned()),
+                    Identifier::Numeric(base),
+                ]
+            };
+            if is_prerelease_identifier(&self.prerelease, identifier) {
+                let base_index = identifier.split('.').count();
+                if !matches!(
+                    self.prerelease.get(base_index),
+                    Some(Identifier::Numeric(_))
+                ) {
+                    self.prerelease = replacement;
+                }
+            } else {
+                self.prerelease = replacement;
+            }
+        }
+        Ok(())
+    }
+
+    fn refresh(&mut self) {
+        self.version = format_version(self.major, self.minor, self.patch, &self.prerelease);
+        self.raw = self.version.clone();
+        if !self.build.is_empty() {
+            self.raw.push('+');
+            self.raw.push_str(&self.build.join("."));
+        }
+    }
 }
 
 impl FromStr for SemVer {
@@ -339,6 +530,26 @@ fn valid_identifier(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
 }
 
+fn checked_increment(value: u64) -> Result<u64, IncrementError> {
+    value.checked_add(1).ok_or(IncrementError::Overflow)
+}
+
+fn join_identifiers(identifiers: &[Identifier]) -> String {
+    identifiers
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+fn is_prerelease_identifier(prerelease: &[Identifier], identifier: &str) -> bool {
+    let expected: Vec<_> = identifier.split('.').collect();
+    expected.len() <= prerelease.len()
+        && prerelease.iter().zip(expected).all(|(actual, expected)| {
+            compare_identifier_text(&actual.as_text(), expected) == Ordering::Equal
+        })
+}
+
 fn format_version(major: u64, minor: u64, patch: u64, prerelease: &[Identifier]) -> String {
     let mut version = format!("{major}.{minor}.{patch}");
     if !prerelease.is_empty() {
@@ -455,5 +666,52 @@ mod tests {
         let right = SemVer::parse("1.2.3+build.10").unwrap();
         assert_eq!(left, right);
         assert_eq!(left.compare_build(&right), Ordering::Less);
+    }
+
+    #[test]
+    fn increments_core_and_prerelease_versions() {
+        for (input, release, expected) in [
+            ("1.2.3", ReleaseType::Major, "2.0.0"),
+            ("1.2.3", ReleaseType::Minor, "1.3.0"),
+            ("1.2.3", ReleaseType::Patch, "1.2.4"),
+            ("1.2.3-4", ReleaseType::Patch, "1.2.3"),
+            ("1.2.4", ReleaseType::Prerelease, "1.2.5-0"),
+            (
+                "1.2.3-alpha.10.beta",
+                ReleaseType::Prerelease,
+                "1.2.3-alpha.11.beta",
+            ),
+            ("1.2.0", ReleaseType::Premajor, "2.0.0-0"),
+            ("1.2.0", ReleaseType::Preminor, "1.3.0-0"),
+            ("1.2.0", ReleaseType::Prepatch, "1.2.1-0"),
+            ("1.0.0-1", ReleaseType::Release, "1.0.0"),
+        ] {
+            let mut version = SemVer::parse(input).unwrap();
+            version
+                .increment(release, None, IdentifierBase::Zero)
+                .unwrap();
+            assert_eq!(version.version(), expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn applies_identifier_and_base_semantics() {
+        let mut version = SemVer::parse("1.2.3-alpha.0.beta").unwrap();
+        version
+            .increment(ReleaseType::Prerelease, Some("alpha"), IdentifierBase::Zero)
+            .unwrap();
+        assert_eq!(version.version(), "1.2.3-alpha.1.beta");
+
+        let mut version = SemVer::parse("1.2.0-1").unwrap();
+        version
+            .increment(ReleaseType::Prerelease, Some("alpha"), IdentifierBase::Omit)
+            .unwrap();
+        assert_eq!(version.version(), "1.2.0-alpha");
+
+        let mut version = SemVer::parse("1.2.3-dev").unwrap();
+        assert_eq!(
+            version.increment(ReleaseType::Prerelease, Some("dev"), IdentifierBase::Omit,),
+            Err(IncrementError::IdentifierAlreadyExists)
+        );
     }
 }

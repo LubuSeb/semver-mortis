@@ -5,7 +5,7 @@ mod coerce;
 mod version;
 
 pub use coerce::{CoerceOptions, coerce, coerce_with_options};
-pub use version::{Identifier, ParseError, SemVer};
+pub use version::{Identifier, IdentifierBase, IncrementError, ParseError, ReleaseType, SemVer};
 
 /// The exact upstream revision used as the behavioral oracle.
 pub const UPSTREAM_COMMIT: &str = "6e05b7637396ac66522cff8731f07cfe0ef49a29";
@@ -45,6 +45,30 @@ fn clean_with_mode(input: &str, loose: bool) -> Option<String> {
         SemVer::parse(cleaned)
     };
     parsed.ok().map(|version| version.version().to_owned())
+}
+
+/// Increment a strict version with npm's default prerelease numbering.
+pub fn inc(input: &str, release: ReleaseType) -> Option<String> {
+    inc_with_options(input, release, false, None, IdentifierBase::Zero)
+}
+
+/// Increment a version with full control over npm's prerelease behavior.
+pub fn inc_with_options(
+    input: &str,
+    release: ReleaseType,
+    loose: bool,
+    identifier: Option<&str>,
+    identifier_base: IdentifierBase,
+) -> Option<String> {
+    let mut version = if loose {
+        SemVer::parse_loose(input).ok()?
+    } else {
+        SemVer::parse(input).ok()?
+    };
+    version
+        .increment(release, identifier, identifier_base)
+        .ok()?;
+    Some(version.version().to_owned())
 }
 
 #[cfg(test)]
