@@ -1,0 +1,15 @@
+[package]
+name = "semver-mortis"
+version = "0.1.0"
+edition = "2024"
+license = "ISC"
+description = "A proof-driven Rust port of npm/node-semver"
+repository = "https://github.com/LubuSeb/semver-mortis"
+
+[lib]
+name = "semver_mortis"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
