@@ -26,3 +26,7 @@ intersection/subset cases without requiring npm dependencies.
 Deterministic property tests add 17,000 generated ordering, round-trip, and
 range-normalization scenarios. See [BENCHMARKS.md](BENCHMARKS.md) for the
 reproducible performance snapshot.
+
+For cross-language randomized checking, point `NODE_SEMVER_ORACLE` at the
+pinned upstream checkout and run `npm run fuzz:differential`. The kickoff run
+passed all 6,000 generated checks; see [FUZZING.md](FUZZING.md).
