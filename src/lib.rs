@@ -2,9 +2,15 @@
 //! A behaviorally compatible Rust port of `npm/node-semver`.
 
 mod coerce;
+mod functions;
 mod version;
 
 pub use coerce::{CoerceOptions, coerce, coerce_with_options};
+pub use functions::{
+    ComparisonOperator, InvalidComparisonOperator, cmp, compare, compare_build, compare_loose,
+    diff, eq, gt, gte, lt, lte, major, minor, neq, patch, prerelease, rcompare, rsort, sort,
+    truncate,
+};
 pub use version::{Identifier, IdentifierBase, IncrementError, ParseError, ReleaseType, SemVer};
 
 /// The exact upstream revision used as the behavioral oracle.
