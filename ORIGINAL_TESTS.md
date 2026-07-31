@@ -11,7 +11,8 @@ verified 66 byte-identical upstream files
 The source is `npm/node-semver` 7.8.5 at commit
 `6e05b7637396ac66522cff8731f07cfe0ef49a29`. All 66 copied JavaScript files
 remain under `tests/original/`; `npm run test:original` verifies every SHA-256
-digest before executing a suite.
+digest before executing a suite. Hashes use the upstream repository's canonical
+LF form; the verifier normalizes CRLF checkouts before hashing.
 
 ## Included unchanged suites
 

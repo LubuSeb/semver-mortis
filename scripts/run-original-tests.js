@@ -15,7 +15,8 @@ const manifest = readFileSync(join(root, 'tests', 'SHA256SUMS'), 'utf8')
 for (const line of manifest) {
   const [, expected, relative] = line.match(/^([0-9a-f]{64})  (.+)$/) || []
   if (!expected) throw new Error(`invalid SHA256SUMS line: ${line}`)
-  const actual = createHash('sha256').update(readFileSync(join(original, relative))).digest('hex')
+  const source = readFileSync(join(original, relative), 'utf8').replace(/\r\n/g, '\n')
+  const actual = createHash('sha256').update(source).digest('hex')
   if (actual !== expected) throw new Error(`upstream test changed: ${relative}`)
 }
 
